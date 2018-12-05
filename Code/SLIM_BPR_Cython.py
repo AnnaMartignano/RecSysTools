@@ -6,7 +6,7 @@ Created on 07/09/17
 @author: Maurizio Ferrari Dacrema
 """
 
-from SLIM_BPR.SLIM_BPR_Python import SLIM_BPR_Python
+from SLIM_BPR_Python import SLIM_BPR_Python
 import subprocess
 import os, sys
 import numpy as np
