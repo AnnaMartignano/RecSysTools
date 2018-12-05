@@ -26,7 +26,7 @@ from libc.math cimport sqrt
 
 
 import scipy.sparse as sps
-from Base.Recommender_utils import check_matrix
+from Recommender_utils import check_matrix
 
 #
 # ctypedef struct data_pointer_s:
