@@ -62,7 +62,7 @@ class SLIM_BPR_Cython(SLIM_BPR_Python):
 
 
         # Import compiled module
-        from SLIM_BPR.Cython.SLIM_BPR_Cython_Epoch import SLIM_BPR_Cython_Epoch
+        from SLIM_BPR_Cython_Epoch import SLIM_BPR_Cython_Epoch
 
 
         self.cythonEpoch = SLIM_BPR_Cython_Epoch(self.URM_mask,
