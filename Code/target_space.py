@@ -1,6 +1,6 @@
 from __future__ import print_function, division
 import numpy as np
-from .helpers import ensure_rng, unique_rows
+from helpers import ensure_rng, unique_rows
 
 
 def _hashable(x):
