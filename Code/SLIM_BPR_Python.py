@@ -11,12 +11,12 @@ import time
 
 import numpy as np
 import scipy.sparse as sps
-from Base.Recommender_utils import similarityMatrixTopK
-from Base.SimilarityMatrixRecommender import SimilarityMatrixRecommender
+from Recommender_utils import similarityMatrixTopK
+from SimilarityMatrixRecommender import SimilarityMatrixRecommender
 from scipy.special import expit
 
-from SLIM_BPR.BPR_sampling import BPR_Sampling
-from Base.Recommender import Recommender
+from BPR_sampling import BPR_Sampling
+from Recommender import Recommender
 
 
 def sigmoidFunction(x):
