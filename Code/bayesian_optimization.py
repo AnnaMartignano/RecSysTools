@@ -5,8 +5,8 @@ import numpy as np
 import warnings
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern
-from .helpers import (UtilityFunction, PrintLog, acq_max, ensure_rng)
-from .target_space import TargetSpace
+from helpers import (UtilityFunction, PrintLog, acq_max, ensure_rng)
+from target_space import TargetSpace
 
 
 class BayesianOptimization(object):
