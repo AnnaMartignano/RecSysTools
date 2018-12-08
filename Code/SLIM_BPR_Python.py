@@ -11,44 +11,224 @@ import time
 
 import numpy as np
 import scipy.sparse as sps
-from Recommender_utils import similarityMatrixTopK
-from SimilarityMatrixRecommender import SimilarityMatrixRecommender
 from scipy.special import expit
 
-from BPR_sampling import BPR_Sampling
-from Recommender import Recommender
+
+
+
+
+def check_matrix(X, format='csc', dtype=np.float32):
+    if format == 'csc' and not isinstance(X, sps.csc_matrix):
+        return X.tocsc().astype(dtype)
+    elif format == 'csr' and not isinstance(X, sps.csr_matrix):
+        return X.tocsr().astype(dtype)
+    elif format == 'coo' and not isinstance(X, sps.coo_matrix):
+        return X.tocoo().astype(dtype)
+    elif format == 'dok' and not isinstance(X, sps.dok_matrix):
+        return X.todok().astype(dtype)
+    elif format == 'bsr' and not isinstance(X, sps.bsr_matrix):
+        return X.tobsr().astype(dtype)
+    elif format == 'dia' and not isinstance(X, sps.dia_matrix):
+        return X.todia().astype(dtype)
+    elif format == 'lil' and not isinstance(X, sps.lil_matrix):
+        return X.tolil().astype(dtype)
+    else:
+        return X.astype(dtype)
+
+
+
+def similarityMatrixTopK(item_weights, forceSparseOutput = True, k=100, verbose = False, inplace=True):
+    """
+    The function selects the TopK most similar elements, column-wise
+
+    :param item_weights:
+    :param forceSparseOutput:
+    :param k:
+    :param verbose:
+    :param inplace: Default True, WARNING matrix will be modified
+    :return:
+    """
+
+    assert (item_weights.shape[0] == item_weights.shape[1]), "selectTopK: ItemWeights is not a square matrix"
+
+    start_time = time.time()
+
+    if verbose:
+        print("Generating topK matrix")
+
+    nitems = item_weights.shape[1]
+    k = min(k, nitems)
+
+    # for each column, keep only the top-k scored items
+    sparse_weights = not isinstance(item_weights, np.ndarray)
+
+    if not sparse_weights:
+
+        idx_sorted = np.argsort(item_weights, axis=0)  # sort data inside each column
+
+        if inplace:
+            W = item_weights
+        else:
+            W = item_weights.copy()
+
+        # index of the items that don't belong to the top-k similar items of each column
+        not_top_k = idx_sorted[:-k, :]
+        # use numpy fancy indexing to zero-out the values in sim without using a for loop
+        W[not_top_k, np.arange(nitems)] = 0.0
+
+        if forceSparseOutput:
+            W_sparse = sps.csr_matrix(W, shape=(nitems, nitems))
+
+            if verbose:
+                print("Sparse TopK matrix generated in {:.2f} seconds".format(time.time() - start_time))
+
+            return W_sparse
+
+        if verbose:
+            print("Dense TopK matrix generated in {:.2f} seconds".format(time.time()-start_time))
+
+        return W
+
+    else:
+        # iterate over each column and keep only the top-k similar items
+        data, rows_indices, cols_indptr = [], [], []
+
+        item_weights = check_matrix(item_weights, format='csc', dtype=np.float32)
+
+        for item_idx in range(nitems):
+
+            cols_indptr.append(len(data))
+
+            start_position = item_weights.indptr[item_idx]
+            end_position = item_weights.indptr[item_idx+1]
+
+            column_data = item_weights.data[start_position:end_position]
+            column_row_index = item_weights.indices[start_position:end_position]
+
+            non_zero_data = column_data!=0
+
+            idx_sorted = np.argsort(column_data[non_zero_data])  # sort by column
+            top_k_idx = idx_sorted[-k:]
+
+            data.extend(column_data[non_zero_data][top_k_idx])
+            rows_indices.extend(column_row_index[non_zero_data][top_k_idx])
+
+
+        cols_indptr.append(len(data))
+
+        # During testing CSR is faster
+        W_sparse = sps.csc_matrix((data, rows_indices, cols_indptr), shape=(nitems, nitems), dtype=np.float32)
+        W_sparse = W_sparse.tocsr()
+
+        if verbose:
+            print("Sparse TopK matrix generated in {:.2f} seconds".format(time.time() - start_time))
+
+        return W_sparse
 
 
 def sigmoidFunction(x):
   return 1 / (1 + np.exp(-x))
 
 
-class SLIM_BPR_Python(BPR_Sampling, SimilarityMatrixRecommender, Recommender):
 
-    RECOMMENDER_NAME = "SLIM_BPR_Recommender"
+class BPR_Sampling(object):
 
-    def __init__(self, URM_train, positive_threshold=4, sparse_weights = False):
+    def __init__(self):
+        super(BPR_Sampling, self).__init__()
+
+
+    def sampleUser(self):
+        """
+        Sample a user that has viewed at least one and not all items
+        :return: user_id
+        """
+        while (True):
+
+            user_id = np.random.randint(0, self.n_users)
+            numSeenItems = self.URM_train[user_id].nnz
+
+            if (numSeenItems > 0 and numSeenItems < self.n_items):
+                return user_id
+
+
+    def sampleItemPair(self, user_id):
+        """
+        Returns for the given user a random seen item and a random not seen item
+        :param user_id:
+        :return: pos_item_id, neg_item_id
+        """
+
+        userSeenItems = self.URM_train[user_id].indices
+
+        pos_item_id = userSeenItems[np.random.randint(0, len(userSeenItems))]
+
+        while (True):
+
+            neg_item_id = np.random.randint(0, self.n_items)
+
+            if (neg_item_id not in userSeenItems):
+                return pos_item_id, neg_item_id
+
+
+    def sampleTriple(self):
+        """
+        Randomly samples a user and then samples randomly a seen and not seen item
+        :return: user_id, pos_item_id, neg_item_id
+        """
+
+        user_id = self.sampleUser()
+        pos_item_id, neg_item_id = self.sampleItemPair(user_id)
+
+        return user_id, pos_item_id, neg_item_id
+
+
+    def initializeFastSampling(self, positive_threshold=3):
+        print("Initializing fast sampling")
+
+        self.eligibleUsers = []
+        self.userSeenItems = dict()
+
+        # Select only positive interactions
+        URM_train_positive = self.URM_train.multiply(self.URM_train>positive_threshold)
+
+        for user_id in range(self.n_users):
+
+            if (URM_train_positive[user_id].nnz > 0):
+                self.eligibleUsers.append(user_id)
+                self.userSeenItems[user_id] = URM_train_positive[user_id].indices
+
+        self.eligibleUsers = np.array(self.eligibleUsers)
+
+
+    def sampleBatch(self):
+        user_id_list = np.random.choice(self.eligibleUsers, size=(self.batch_size))
+        pos_item_id_list = [None]*self.batch_size
+        neg_item_id_list = [None]*self.batch_size
+
+        for sample_index in range(self.batch_size):
+            user_id = user_id_list[sample_index]
+
+            pos_item_id_list[sample_index] = np.random.choice(self.userSeenItems[user_id])
+
+            negItemSelected = False
+
+            # It's faster to just try again then to build a mapping of the non-seen items
+            # for every user
+            while (not negItemSelected):
+                neg_item_id = np.random.randint(0, self.n_items)
+
+                if (neg_item_id not in self.userSeenItems[user_id]):
+                    negItemSelected = True
+                    neg_item_id_list[sample_index] = neg_item_id
+
+        return user_id_list, pos_item_id_list, neg_item_id_list
+
+
+class SLIM_BPR_Python(BPR_Sampling):
+
+    def __init__(self, URM_train, positive_threshold=3, sparse_weights = False):
         super(SLIM_BPR_Python, self).__init__()
 
-        """
-          Creates a new object for training and testing a Bayesian
-          Personalised Ranking (BPR) SLIM
-
-          This object uses the Theano library for training the model, meaning
-          it can run on a GPU through CUDA. To make sure your Theano
-          install is using the GPU, see:
-
-            http://deeplearning.net/software/theano/tutorial/using_gpu.html
-
-          When running on CPU, we recommend using OpenBLAS.
-
-            http://www.openblas.net/
-        """
-        """
-        if objective!='sigmoid' and objective != 'logsigmoid':
-            raise ValueError("Objective not valid. Acceptable values are 'sigmoid' and 'logsigmoid'. Provided value was '{}'".format(objective))
-        self.objective = objective
-        """
 
         self.URM_train = URM_train
         self.n_users = URM_train.shape[0]
@@ -57,12 +237,18 @@ class SLIM_BPR_Python(BPR_Sampling, SimilarityMatrixRecommender, Recommender):
         self.sparse_weights = sparse_weights
         self.positive_threshold = positive_threshold
 
+        #self.URM_mask = self.URM_train >= self.positive_threshold
 
         self.URM_mask = self.URM_train.copy()
 
         self.URM_mask.data = self.URM_mask.data >= self.positive_threshold
         self.URM_mask.eliminate_zeros()
 
+
+        if self.sparse_weights:
+            self.S = sps.csr_matrix((self.n_items, self.n_items), dtype=np.float32)
+        else:
+            self.S = np.zeros((self.n_items, self.n_items)).astype('float32')
 
 
 
@@ -72,14 +258,11 @@ class SLIM_BPR_Python(BPR_Sampling, SimilarityMatrixRecommender, Recommender):
     def updateSimilarityMatrix(self):
 
         if self.topK != False:
-            if self.sparse_weights:
-                self.W_sparse = similarityMatrixTopK(self.S.T, k=self.topK, forceSparseOutput=True)
-            else:
-                self.W = similarityMatrixTopK(self.S.T, k=self.topK, forceSparseOutput=False)
-
+            self.sparse_weights = True
+            self.W_sparse = similarityMatrixTopK(self.S.T, k=self.topK)
         else:
-            if self.sparse_weights:
-                self.W_sparse = sps.csr_matrix(self.S.T)
+            if self.sparse_weights == True:
+                self.W_sparse = self.S.T
             else:
                 self.W = self.S.T
 
@@ -157,15 +340,6 @@ class SLIM_BPR_Python(BPR_Sampling, SimilarityMatrixRecommender, Recommender):
 
             gradient = np.sum(1 / (1 + np.exp(x_uij))) / self.batch_size
 
-        # Sigmoid whose argument is minus in order for the exponent of the exponential to be positive
-        # Best performance with: gradient = np.sum(expit(-x_uij)) / self.batch_size
-        #gradient = np.sum(x_uij) / self.batch_size
-        #gradient = expit(-gradient)
-        #gradient = np.sum(expit(-x_uij)) / self.batch_size
-        #gradient = np.sum(np.log(expit(x_uij))) / self.batch_size
-        #gradient = np.sum(1/(1+np.exp(x_uij))) / self.batch_size
-        #gradient = min(10, max(-10, gradient))+10
-
 
         if self.batch_size==1:
 
@@ -197,22 +371,40 @@ class SLIM_BPR_Python(BPR_Sampling, SimilarityMatrixRecommender, Recommender):
             self.S[j] -= self.learning_rate * gradient * itemsToUpdate
             self.S[j, j] = 0
 
-
-
-    def fit(self, epochs=30, logFile=None, URM_test=None, filterTopPop = False, minRatingsPerUser=1,
+    def fit(self, epochs=30, logFile=None, URM_test=None, minRatingsPerUser=1,
             batch_size = 1000, validate_every_N_epochs = 1, start_validation_after_N_epochs = 0,
             lambda_i = 0.0025, lambda_j = 0.00025, learning_rate = 0.05, topK = False):
 
 
 
-        if self.sparse_weights:
-            self.S = sps.csr_matrix((self.n_items, self.n_items), dtype=np.float32)
-        else:
-            self.S = np.zeros((self.n_items, self.n_items)).astype('float32')
-
-
         self.initializeFastSampling(positive_threshold=self.positive_threshold)
 
+
+        self.fit_alreadyInitialized(epochs=epochs,
+                                    logFile=logFile,
+                                    URM_test=URM_test,
+                                    minRatingsPerUser=minRatingsPerUser,
+                                    batch_size = batch_size,
+                                    validate_every_N_epochs = validate_every_N_epochs,
+                                    start_validation_after_N_epochs = start_validation_after_N_epochs,
+                                    lambda_i = lambda_i,
+                                    lambda_j = lambda_j,
+                                    learning_rate = learning_rate,
+                                    topK = topK)
+
+
+
+    def fit_alreadyInitialized(self, epochs=30, logFile=None, URM_test=None, minRatingsPerUser=1,
+            batch_size = 1000, validate_every_N_epochs = 1, start_validation_after_N_epochs = 0,
+            lambda_i = 0.0025, lambda_j = 0.00025, learning_rate = 0.05, topK = False):
+        """
+        Fits the model performing a round of testing at the end of each epoch
+        :param epochs:
+        :param batch_size:
+        :param logFile:
+        :param URM_test:
+        :return:
+        """
 
 
         if(topK != False and topK<1):
@@ -232,34 +424,33 @@ class SLIM_BPR_Python(BPR_Sampling, SimilarityMatrixRecommender, Recommender):
 
             start_time_epoch = time.time()
 
-            if self.batch_size>0:
-                self.epochIteration()
+            if currentEpoch > 0:
+                if self.batch_size>0:
+                    self.epochIteration()
+                else:
+                    print("No batch not available")
             else:
-                print("No batch not available")
+                self.updateSimilarityMatrix()
 
-
-            if (URM_test is not None) and ((currentEpoch +1 )% validate_every_N_epochs == 0) and \
-                            currentEpoch+1 >= start_validation_after_N_epochs:
+            if (URM_test is not None) and (currentEpoch % validate_every_N_epochs == 0) and \
+                            currentEpoch >= start_validation_after_N_epochs:
 
                 print("Evaluation begins")
 
-                self.updateSimilarityMatrix()
 
-                results_run = self.evaluateRecommendations(URM_test, filterTopPop=filterTopPop,
+                results_run = self.evaluateRecommendations(URM_test,
                                                            minRatingsPerUser=minRatingsPerUser)
 
-                self.writeCurrentConfig(currentEpoch+1, results_run, logFile)
+                self.writeCurrentConfig(currentEpoch, results_run, logFile)
 
-                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch+1, epochs,
+                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch, epochs,
                                                                      float(time.time() - start_time_epoch) / 60))
 
 
             # Fit with no validation
             else:
-                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch+1, epochs,
+                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch, epochs,
                                                                          float(time.time() - start_time_epoch) / 60))
-
-        self.updateSimilarityMatrix()
 
         print("Fit completed in {:.2f} minutes".format(float(time.time() - start_time_train) / 60))
 
@@ -285,7 +476,6 @@ class SLIM_BPR_Python(BPR_Sampling, SimilarityMatrixRecommender, Recommender):
             logFile.write("Test case: {}, Results {}\n".format(current_config, results_run))
             # logFile.write("Weights: {}\n".format(str(list(self.weights))))
             logFile.flush()
-
 
 
 
@@ -334,5 +524,31 @@ class SLIM_BPR_Python(BPR_Sampling, SimilarityMatrixRecommender, Recommender):
 
         self.S[np.arange(0, self.n_items), np.arange(0, self.n_items)] = 0.0
 
+        self.updateSimilarityMatrix()
 
 
+
+    def recommend(self, user_id, at=None, exclude_seen=True):
+        # compute the scores using the dot product
+        user_profile = self.URM_train[user_id]
+        scores = user_profile.dot(self.W_sparse).toarray().ravel()
+
+        if exclude_seen:
+            scores = self.filter_seen(user_id, scores)
+
+        # rank items
+        ranking = scores.argsort()[::-1]
+
+        return ranking[:at]
+
+
+    def filter_seen(self, user_id, scores):
+
+        start_pos = self.URM_train.indptr[user_id]
+        end_pos = self.URM_train.indptr[user_id+1]
+
+        user_profile = self.URM_train.indices[start_pos:end_pos]
+
+        scores[user_profile] = -np.inf
+
+        return scores
