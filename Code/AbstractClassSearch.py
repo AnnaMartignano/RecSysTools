@@ -55,7 +55,8 @@ def from_fit_params_to_saved_params_function_default(recommender, paramether_dic
 
     # Attributes that might be determined through early stopping
     # Name in param_dictionary: name in object
-    attributes_to_clone = {"epochs": 'epochs_best', "max_epochs": 'epochs_best'}
+    #attributes_to_clone = {"epochs": 'epochs_best', "max_epochs": 'epochs_best'}
+    attributes_to_clone = {}
 
     for external_attribute_name in attributes_to_clone:
 
