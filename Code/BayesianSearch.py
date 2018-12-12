@@ -12,8 +12,9 @@ import traceback, pickle
 import numpy as np
 
 try:
-    #from bayes_opt import BayesianOptimization
-    from bayesian_optimization import BayesianOptimization
+    #use unmodified bayes optimization
+    from bayes_opt import BayesianOptimization
+    #from bayesian_optimization import BayesianOptimization
 except ImportError as importError:
     print("Unable to load BayesianOptimization module. Please install it using 'pip install bayesian-optimization' "
           "or download it from 'https://github.com/fmfn/BayesianOptimization'")
