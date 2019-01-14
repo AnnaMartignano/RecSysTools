@@ -243,7 +243,7 @@ class CFW_D_Similarity_Linalg(SimilarityMatrixRecommender, Recommender):
             feature_weights = self.D_best
 
 
-        self.similarity = Compute_Similarity(self.ICM.T, shrink=0, topK=self.topK,
+        self.similarity = Compute_Similarity_Cython(self.ICM.T, shrink=0, topK=self.topK,
                                             normalize=self.normalize_similarity, row_weights=feature_weights)
 
         self.W_sparse = self.similarity.compute_similarity()
